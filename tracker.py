@@ -162,34 +162,53 @@ def check_product(url):
 
         old_price = last_prices.get(asin)
         
-        # تجهيز تفاصيل التغيير في السعر إن وجد
-        price_status_text = ""
+        # 1. لو أول مرة يرصد المنتج: يحفظ السعر بصمت بدون إرسال إشعار
         if old_price is None:
-            price_status_text = f"\n💰 السعر الحالي: <b>{price} ج.م</b> (أول رصد)"
-        elif price < old_price:
+            last_prices[asin] = price
+            save_prices()
+            print(f"-> أول رصد للمنتج بالسعر: {price} ج.م (تم الحفظ بدون إشعار)")
+            return
+
+        # 2. لو السعر نزل: نحسب نسبة الخصم
+        if price < old_price:
             drop_amount = old_price - price
             drop_percent = (drop_amount / old_price) * 100
-            price_status_text = f"\n📉 السعر السابق: <s>{old_price} ج.م</s>\n💰 السعر الحالي: <b>{price} ج.م</b>\n🔥 هبوط في السعر بنسبة <b>{drop_percent:.1f}%</b> (وفرت {drop_amount:.0f} ج.م)"
-        elif price > old_price:
-            raise_amount = price - old_price
-            price_status_text = f"\n📈 السعر السابق: {old_price} ج.م\n💰 السعر الحالي: <b>{price} ج.م</b> (ارتفاع بمقدار {raise_amount:.0f} ج.م)"
-        else:
-            price_status_text = f"\n💰 السعر: <b>{price} ج.م</b> (ثابت)"
-
-        safe_name = html.escape(raw_name)
-        product_link = f"https://www.amazon.eg/dp/{asin}"
+            
+            # شرط إرسال الإشعار: نسبة الخصم أكبر من 20%
+            if drop_percent > 20:
+                safe_name = html.escape(raw_name)
+                product_link = f"https://www.amazon.eg/dp/{asin}"
+                
+                price_status_text = (
+                    f"\n📉 السعر السابق: <s>{old_price} ج.م</s>"
+                    f"\n💰 السعر الحالي: <b>{price} ج.م</b>"
+                    f"\n🔥 هبوط قوي بنسبة <b>{drop_percent:.1f}%</b> (وفرت {drop_amount:.0f} ج.م)"
+                )
+                
+                msg = (
+                    f"🚨 <b>تنبيه خصم كبير (+20%):</b>\n\n"
+                    f"🛒 <a href='{product_link}'>{safe_name}</a>"
+                    f"{price_status_text}"
+                )
+                send(msg)
+                
+                # تحديث السعر في قاعدة البيانات بعد إرسال الإشعار
+                last_prices[asin] = price
+                save_prices()
+                print(f"-> 🔥 تم إرسال إشعار! خصم {drop_percent:.1f}% (السعر الجديد: {price} ج.م)")
+            else:
+                # لم نحدث السعر هنا لكي لا يضيع الخصم لو نزل السعر تدريجياً على عدة مرات
+                print(f"-> انخفاض بسيط ({drop_percent:.1f}%) أقل من 20% (لم يتم الإرسال)")
         
-        # إرسال تفاصيل المنتج للتيليجرام مباشرة
-        msg = (
-            f"📦 <b>تقرير منتج:</b>\n\n"
-            f"🛒 <a href='{product_link}'>{safe_name}</a>"
-            f"{price_status_text}"
-        )
-        send(msg)
-
-        last_prices[asin] = price
-        save_prices()
-        print(f"-> تم إرسال التقرير بنجاح: {price} ج.م")
+        # 3. لو السعر زاد: نحدث السعر الجديد بصمت لنقارن أي خصم قادم بناءً عليه
+        elif price > old_price:
+            last_prices[asin] = price
+            save_prices()
+            print(f"-> ارتفع السعر إلى {price} ج.م (تم التحديث بصمت)")
+            
+        # 4. لو السعر ثابت
+        else:
+            print(f"-> السعر ثابت ({price} ج.م)")
         
     except Exception as e:
         print(f"-> خطأ في الاتصال: {e}")
